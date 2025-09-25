@@ -1,0 +1,32 @@
+{
+  "timestamp": "2025-09-25T16:14:52.255Z",
+  "total": 5,
+  "passed": 2,
+  "failed": 3,
+  "success_rate": 40,
+  "details": [
+    {
+      "test": "job_recommendations",
+      "status": "FAIL",
+      "error": "Request failed with status code 404"
+    },
+    {
+      "test": "interview_questions",
+      "status": "FAIL",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "test": "catch_integration",
+      "status": "PASS"
+    },
+    {
+      "test": "social_login",
+      "status": "FAIL",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "test": "comprehensive_job_info",
+      "status": "PASS"
+    }
+  ]
+}

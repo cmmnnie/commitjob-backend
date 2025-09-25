@@ -1,0 +1,351 @@
+openapi: 3.0.3
+info:
+  title: "CommitJob Auth API (Google & Kakao OAuth)"
+  version: "1.0.0"
+  description: |
+    CommitJob의 소셜 로그인(Google/Kakao)과 세션 관리 API 명세입니다.
+    - 로그인 시작: /auth/google, /auth/kakao (302 Redirect)
+    - 콜백: /auth/google/callback, /auth/kakao/callback (302 Redirect back to origin)
+    - 세션 조회: /api/me
+    - 로그아웃: /api/logout
+
+servers:
+  - url: "http://localhost:3001"
+    description: "Local"
+  - url: "https://commitjob.site"
+    description: "Production"
+
+tags:
+  - name: "Auth"
+    description: "OAuth 인증 및 세션 관리 API"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: app_session
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        email:
+          type: string
+          nullable: true
+          example: "user@example.com"
+        name:
+          type: string
+          nullable: true
+          example: "홍길동"
+        picture:
+          type: string
+          nullable: true
+          example: "https://example.com/avatar.png"
+        provider:
+          type: string
+          enum: ["google", "kakao"]
+          example: "google"
+
+    Ok:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "INVALID_STATE"
+            message:
+              type: string
+              example: "state mismatch"
+
+paths:
+  /auth/google:
+    get:
+      tags: ["Auth"]
+      summary: "Google OAuth 로그인 시작"
+      description: "프런트 오리진을 받아 Google 인증 페이지로 302 리다이렉트합니다."
+      parameters:
+        - in: query
+          name: origin
+          required: true
+          description: "로그인 시작한 프런트엔드 Origin"
+          schema:
+            type: string
+            example: "http://localhost:5173"
+      responses:
+        "302":
+          description: "Redirect to Google OAuth authorize URL"
+
+  /auth/google/callback:
+    get:
+      tags: ["Auth"]
+      summary: "Google OAuth 콜백"
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: "Redirect back to {origin}/auth/callback?ok=1 (or ok=0)"
+        "403":
+          description: "INVALID_STATE"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: "GOOGLE_API_ERROR"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/kakao:
+    get:
+      tags: ["Auth"]
+      summary: "Kakao OAuth 로그인 시작"
+      description: "프런트 오리진을 받아 Kakao 인증 페이지로 302 리다이렉트합니다."
+      parameters:
+        - in: query
+          name: origin
+          required: true
+          description: "로그인 시작한 프런트엔드 Origin"
+          schema:
+            type: string
+            example: "http://localhost:5174"
+      responses:
+        "302":
+          description: "Redirect to Kakao OAuth authorize URL"
+
+  /auth/kakao/callback:
+    get:
+      tags: ["Auth"]
+      summary: "Kakao OAuth 콜백"
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: "Redirect back to {origin}/auth/callback?ok=1 (or ok=0)"
+        "403":
+          description: "INVALID_STATE"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: "KAKAO_API_ERROR"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/me:
+    get:
+      tags: ["Auth"]
+      summary: "현재 로그인한 사용자 조회"
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: "로그인 사용자 정보"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    oneOf:
+                      - type: "null"
+                      - $ref: "#/components/schemas/User"
+        "401":
+          description: "세션 없음/만료"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: "null"
+
+  /api/logout:
+    post:
+      tags: ["Auth"]
+      summary: "로그아웃 (세션 쿠키 삭제)"
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: "로그아웃 성공"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ok" }
+        "401":
+          description: "(선택) INVALID_TOKEN"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+info:
+  title: CommitJob API
+  version: 0.1.0
+servers:
+  - url: /api
+tags:
+  - name: Health
+  - name: Profile
+  - name: Recommendation
+  - name: Interview
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: 헬스 체크
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  message: { type: string, example: Backend is healthy! }
+
+  /profile:
+    post:
+      tags: [Profile]
+      summary: 사용자 프로필 저장 (필수 3개 + 자기소개서 파일)
+      description: >
+        프론트는 상세 입력 UI를 제공하지만, 백엔드는 **선택값만 저장**합니다.
+        파일은 multipart/form-data 로 업로드하여 서버에 저장하고 DB에는 경로만 저장합니다.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [user_id, jobs, careers, regions, resume]
+              properties:
+                user_id:
+                  type: integer
+                  example: 1
+                jobs:
+                  type: string
+                  description: 희망직무(선택값)
+                  example: 백엔드 개발자
+                careers:
+                  type: string
+                  description: 경력(선택값)
+                  enum: [신입, 1-3년, 4-6년, 7년 이상]
+                  example: 1-3년
+                regions:
+                  type: string
+                  description: 지역(선택값)
+                  example: 서울
+                resume:
+                  type: string
+                  format: binary
+                  description: 자기소개서 파일
+      responses:
+        '201':
+          description: 저장 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: 입력 오류
+        '500':
+          description: 서버 오류
+
+  /recommendations:
+    get:
+      tags: [Recommendation]
+      summary: 맞춤형 공고 추천
+      description: 저장된 프로필 기반 추천. (현재 스텁 응답)
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: integer, example: 1 }
+      responses:
+        '200':
+          description: 추천 리스트
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobRecommendation'
+
+  /interview/questions:
+    post:
+      tags: [Interview]
+      summary: 면접 예상 질문 생성
+      description: 저장된 프로필(직무/경력/지역) 기준의 샘플 질문. (현재 스텁 응답)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: integer
+                  example: 1
+      responses:
+        '200':
+          description: 질문 리스트
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    question: { type: string, example: 최근 프로젝트에서 성과를 수치로 설명해 주세요. }
+
+components:
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        user_id: { type: integer, example: 1 }
+        jobs: { type: string, example: 백엔드 개발자 }
+        careers: { type: string, example: 1-3년 }
+        regions: { type: string, example: 서울 }
+        resume_path: { type: string, example: /uploads/resume/1_20250922.pdf }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    JobRecommendation:
+      type: object
+      properties:
+        company:   { type: string, example: 커밋컴퍼니 }
+        title:     { type: string, example: 백엔드 개발자(노드/리눅스) }
+        location:  { type: string, example: 서울 }
+        match:     { type: number, example: 87, description: 매칭 점수(0-100) }
+        url:       { type: string, example: https://jobs.example.com/123 }
