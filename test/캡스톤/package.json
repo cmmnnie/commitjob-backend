@@ -1,0 +1,35 @@
+{
+  "name": "commitjob-backend-monorepo",
+  "version": "1.0.0",
+  "description": "CommitJob Backend - 졸업작품 맞춤형 채용 플랫폼",
+  "scripts": {
+    "start": "concurrently \"npm run start:catch\" \"npm run start:mcp\" \"npm run start:backend\" --names \"🐍CATCH,🤖MCP,🌐BACKEND\" --prefix-colors \"green,blue,yellow\"",
+    "start:backend": "cd backend && npm start",
+    "start:mcp": "cd mcp-recs-service && npm start",
+    "start:catch": "cd catch-scraper-service && python3 catch_scraper.py",
+    "install:all": "npm install && cd backend && npm install && cd ../mcp-recs-service && npm install && cd ../catch-scraper-service && pip3 install -r requirements.txt",
+    "dev": "npm run start",
+    "test": "echo \"통합 테스트 실행\" && node integration-test.js",
+    "health": "curl http://localhost:4001/health && curl http://localhost:4002/health && curl http://localhost:3000/health"
+  },
+  "keywords": [
+    "job-recommendation",
+    "interview-questions",
+    "social-login",
+    "chatgpt",
+    "graduation-project"
+  ],
+  "author": "Capstone Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cmmnnie/commitjob-backend.git"
+  }
+}
