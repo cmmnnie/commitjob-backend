@@ -19,8 +19,8 @@ const app = express();
 // ✨ 안전한 포트/호스트 결정
 const PORT = Number(process.env.PORT || 4001);
 
-// 호스트는 명시적으로 127.0.0.1로 바인딩 (Nginx가 같은 서버에서 프록시하므로 OK)
-const HOST = process.env.HOST || '127.0.0.1';
+// 모든 네트워크 인터페이스에서 접근 가능하도록 설정 (프론트엔드 팀 접근용)
+const HOST = process.env.HOST || '0.0.0.0';
 
 // 중복 listen 방지 - 혹시 다른 곳에서 httpServer.listen을 또 호출하면 에러 띄우게
 if (!app._listening) {
