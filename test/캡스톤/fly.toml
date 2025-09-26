@@ -1,0 +1,25 @@
+app = "commitjob-backend"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "4001"
+
+[[services]]
+  internal_port = 4001
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[http_service]
+  internal_port = 4001
+  force_https = true
