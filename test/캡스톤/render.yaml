@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: commitjob-backend
+    env: node
+    plan: free
+    buildCommand: npm run install:all
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4001
+      - key: FRONTEND_ORIGIN
+        value: https://commitjob.site,https://www.commitjob.site
+      - key: GOOGLE_CLIENT_ID
+        fromDatabase: false
+        value: 807485751367-8i85jkhra9r279rl7csc1al10s3uonse.apps.googleusercontent.com
+      - key: GOOGLE_CLIENT_SECRET
+        fromDatabase: false
+        value: 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
+      - key: GOOGLE_REDIRECT_URI
+        value: https://commitjob.site/auth/google/callback
+      - key: KAKAO_REST_API_KEY
+        value: 03bd5759c1e6f11d99bb13ff506af18c
+      - key: KAKAO_REDIRECT_URI
+        value: https://commitjob.site/auth/kakao/callback
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MCP_INGEST_BASE
+        value: https://commitjob.site
+      - key: MCP_RECS_BASE
+        value: https://commitjob.site
