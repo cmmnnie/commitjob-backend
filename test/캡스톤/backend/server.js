@@ -638,8 +638,6 @@ app.get("/session/recs", async (req, res) => {
  *                         type: array
  *                         items:
  *                           type: string
- *                       match_score:
- *                         type: number
  *                       reasoning:
  *                         type: string
  *                       strengths:
@@ -792,8 +790,6 @@ app.get("/api/gpt-recommendations", async (req, res) => {
  *                         type: array
  *                         items:
  *                           type: string
- *                       popularity_score:
- *                         type: number
  *                       trending_reason:
  *                         type: string
  *       500:
@@ -1096,8 +1092,6 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
  *                       type: array
  *                       items:
  *                         type: string
- *                     overall_fit_score:
- *                       type: number
  *       400:
  *         description: 필수 파라미터 누락 또는 잘못된 요청
  *       404:
