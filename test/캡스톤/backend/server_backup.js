@@ -39,32 +39,9 @@ if (!app._listening) {
 
 // --- Swagger UI ---
 import swaggerUi from 'swagger-ui-express';
-import swaggerJsdoc from 'swagger-jsdoc';
-
-const swaggerOptions = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'CommitJob Backend API',
-      version: '1.0.0',
-      description: 'GPT MCP 기반 맞춤형 채용공고 추천 및 면접 질문 생성 API',
-    },
-    servers: [
-      {
-        url: 'http://172.30.1.28:4001',
-        description: 'Development server (IP)',
-      },
-      {
-        url: 'http://api.commitjob.site:4001',
-        description: 'Development server (Domain)',
-      },
-    ],
-  },
-  apis: ['./server.js'], // 현재 파일에서 swagger 주석을 읽음
-};
-
-const swaggerSpec = swaggerJsdoc(swaggerOptions);
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
+import YAML from 'yamljs';
+const openapi = YAML.load('./openapi.yaml');
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, { explorer: true }));
 
 /* -------------------- 기본 설정 -------------------- */
 app.use(cookieParser());
@@ -611,13 +588,13 @@ app.get("/session/recs", async (req, res) => {
   }
 });
 
-/* -------------------- GPT MCP 기반 추천 API -------------------- */
+/* -------------------- GPT MCP 기반 맞춤 추천 API -------------------- */
 /**
  * @swagger
- * /api/gpt-recommendations:
+ * /api/advanced-recommendations:
  *   get:
- *     summary: GPT MCP 기반 개인화된 채용공고 추천
- *     tags: [GPT Recommendations]
+ *     summary: 고급 알고리즘 기반 맞춤형 채용공고 추천
+ *     tags: [Advanced Recommendations]
  *     parameters:
  *       - in: query
  *         name: sessionId
@@ -626,21 +603,21 @@ app.get("/session/recs", async (req, res) => {
  *           type: string
  *         description: 세션 ID
  *       - in: query
+ *         name: algorithm
+ *         schema:
+ *           type: string
+ *           enum: [content, collaborative, deep, ensemble]
+ *           default: ensemble
+ *         description: 사용할 추천 알고리즘
+ *       - in: query
  *         name: top
  *         schema:
  *           type: integer
  *           default: 20
  *         description: 반환할 추천 개수
- *       - in: query
- *         name: jobType
- *         schema:
- *           type: string
- *           enum: [IT, 빅데이터, 전체]
- *           default: 전체
- *         description: 필터링할 직무 타입
  *     responses:
  *       200:
- *         description: GPT 기반 추천 결과
+ *         description: 추천 결과
  *         content:
  *           application/json:
  *             schema:
@@ -653,240 +630,163 @@ app.get("/session/recs", async (req, res) => {
  *                     properties:
  *                       job_id:
  *                         type: string
- *                       title:
+ *                       score:
+ *                         type: number
+ *                       algorithm:
  *                         type: string
- *                       company:
+ *                       explanation:
  *                         type: string
- *                       skills:
- *                         type: array
- *                         items:
- *                           type: string
- *                       reasoning:
- *                         type: string
- *                       strengths:
- *                         type: array
- *                         items:
- *                           type: string
- *                       areas_for_growth:
- *                         type: array
- *                         items:
- *                           type: string
- *       400:
- *         description: 필수 파라미터 누락 또는 잘못된 요청
- *       500:
- *         description: 서버 오류
+ *                 algorithm_used:
+ *                   type: string
+ *                 engine_stats:
+ *                   type: object
  */
-app.get("/api/gpt-recommendations", async (req, res) => {
+app.get("/api/advanced-recommendations", async (req, res) => {
   try {
-    const { sessionId, top = 20, jobType = '전체' } = req.query;
+    const { sessionId, top = 20, algorithm = 'ensemble' } = req.query;
     const s = ensureSession(String(sessionId));
+    if (!s.user) return res.status(400).json({ error: { code: "NO_USER_PROFILE" } });
+    if (!s.jobs.length) return res.json({ items: [] });
 
-    if (!s.user) {
-      return res.status(400).json({ error: { code: "NO_USER_PROFILE" } });
-    }
+    const userId = `session_${sessionId}`;
 
-    if (!s.jobs.length) {
-      return res.json({ items: [] });
-    }
+    // 사용자 프로필을 추천 엔진에 추가
+    recommendationEngine.addUserProfile(userId, {
+      skills: s.user.skills || [],
+      experience: s.user.experience || '',
+      interests: s.user.interests || '',
+      location: s.user.region || '',
+      age: s.user.age || null
+    });
 
-    // 직무 타입 필터링
-    let filteredJobs = s.jobs;
-    if (jobType !== '전체') {
-      filteredJobs = s.jobs.filter(job => {
-        const jobSkills = (job.skills || []).map(skill => skill.toLowerCase());
-        const jobTitle = (job.title || '').toLowerCase();
-        const jobDescription = (job.description || '').toLowerCase();
-
-        if (jobType === 'IT') {
-          return jobSkills.some(skill =>
-            ['javascript', 'python', 'java', 'node.js', 'react', 'vue', 'angular', 'spring', 'django'].includes(skill)
-          ) || jobTitle.includes('개발') || jobTitle.includes('프로그래머') || jobDescription.includes('개발');
-        } else if (jobType === '빅데이터') {
-          return jobSkills.some(skill =>
-            ['python', 'sql', 'spark', 'hadoop', 'tensorflow', 'pytorch', 'pandas', 'numpy'].includes(skill)
-          ) || jobTitle.includes('데이터') || jobTitle.includes('분석') || jobDescription.includes('빅데이터');
-        }
-        return true;
+    // 채용공고 특성을 추천 엔진에 추가
+    for (const job of s.jobs) {
+      recommendationEngine.addItemFeatures(job.job_id, {
+        title: job.title || '',
+        description: job.description || '',
+        requirements: job.requirements || '',
+        skills: job.skills || [],
+        company: job.company || '',
+        location: job.region || '',
+        category: job.category || 'general'
       });
     }
 
-    if (!filteredJobs.length) {
-      return res.json({ items: [] });
-    }
-
-    console.log(`[GPT-RECS] Requesting recommendations for ${filteredJobs.length} jobs, jobType: ${jobType}`);
-
-    const { data } = await axios.post(
-      `${process.env.MCP_RECS_BASE}/tools/gpt_recommend_jobs`,
-      {
-        sessionId: String(sessionId),
-        userProfile: {
-          skills: s.user.skills || [],
-          years: s.user.years,
-          region: s.user.region,
-          role: s.user.role,
-          resumeHints: s.user.resumeHints
-        },
-        jobListings: filteredJobs.map(job => ({
-          job_id: job.job_id,
-          company_id: job.company_id,
-          title: job.title,
-          company: job.company,
-          skills: job.skills || [],
-          region: job.region,
-          years_min: job.years_min,
-          years_max: job.years_max,
-          description: job.description,
-          jobType: jobType
-        })),
-        topK: Math.min(Number(top) || 20, 50),
-        jobTypeFilter: jobType
-      },
-      { timeout: 30000 }
+    // 고급 알고리즘으로 추천 생성
+    const candidateIds = s.jobs.map(j => j.job_id);
+    const recommendations = await recommendationEngine.recommend(
+      userId,
+      candidateIds,
+      Number(top),
+      algorithm
     );
 
-    if (data?.recommendations) {
-      res.json({
-        items: data.recommendations,
-        total_analyzed: filteredJobs.length,
-        job_type_filter: jobType,
-        recommendation_strategy: 'gpt_mcp_based',
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      res.status(500).json({ error: { code: "GPT_RECS_NO_DATA" } });
-    }
+    // 결과를 기존 형식에 맞게 변환
+    const candidates = recommendations.map(rec => {
+      const job = s.jobs.find(j => j.job_id === rec.itemId);
+      if (!job) return null;
 
+      return {
+        job_id: job.job_id,
+        company_id: job.company_id,
+        title: job.title,
+        skills: job.skills || [],
+        region: job.region || null,
+        years_min: job.years_min ?? null,
+        years_max: job.years_max ?? null,
+        description: job.description || "",
+        score: Number(rec.score.toFixed(4)),
+        algorithm: rec.algorithm,
+        explanation: recommendationEngine.explainRecommendation(rec),
+        algorithm_details: rec.algorithmScores || null
+      };
+    }).filter(Boolean);
+
+    res.json({
+      items: candidates,
+      algorithm_used: algorithm,
+      total_candidates: candidateIds.length,
+      engine_stats: recommendationEngine.getStatistics()
+    });
   } catch (e) {
-    console.error("[GPT-RECS] Error:", e.response?.data || e.message);
-    res.status(500).json({ error: { code: "GPT_RECS_FAILED" } });
+    console.error("[advanced-recommendations error]", e);
+    res.status(500).json({ error: { code: "ADVANCED_RECS_FAILED" } });
   }
 });
 
 /**
  * @swagger
- * /api/main-recommendations:
- *   get:
- *     summary: 메인 페이지용 IT/빅데이터 추천 (로그인 불필요)
- *     tags: [GPT Recommendations]
- *     parameters:
- *       - in: query
- *         name: jobType
- *         schema:
- *           type: string
- *           enum: [IT, 빅데이터, 전체]
- *           default: IT
- *         description: 추천할 직무 타입
- *       - in: query
- *         name: top
- *         schema:
- *           type: integer
- *           default: 10
- *         description: 반환할 추천 개수
- *       - in: query
- *         name: experienceLevel
- *         schema:
- *           type: string
- *           enum: [신입, 경력, 전체]
- *           default: 전체
- *         description: 경력 수준 필터
+ * /api/train-recommendation-engine:
+ *   post:
+ *     summary: 추천 엔진 훈련 (관리자용)
+ *     tags: [Advanced Recommendations]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               interactions:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     userId:
+ *                       type: string
+ *                     itemId:
+ *                       type: string
+ *                     rating:
+ *                       type: number
+ *                       minimum: 1
+ *                       maximum: 5
  *     responses:
  *       200:
- *         description: 메인 페이지 추천 결과
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 items:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       job_id:
- *                         type: string
- *                       title:
- *                         type: string
- *                       company:
- *                         type: string
- *                       skills:
- *                         type: array
- *                         items:
- *                           type: string
- *                       trending_reason:
- *                         type: string
- *       500:
- *         description: 서버 오류
+ *         description: 훈련 완료
  */
-app.get("/api/main-recommendations", async (req, res) => {
+app.post("/api/train-recommendation-engine", async (req, res) => {
   try {
-    const { jobType = 'IT', top = 10, experienceLevel = '전체' } = req.query;
+    const { interactions } = req.body;
 
-    // 데모 데이터나 실제 전체 채용공고 데이터 사용
-    let allJobs = [];
-
-    if (global.demoData) {
-      allJobs = global.demoData.jobs.map(job => ({
-        job_id: job.id,
-        company_id: job.companyId,
-        title: job.title,
-        company: job.companyName,
-        skills: job.requiredSkills || [],
-        region: job.location,
-        description: job.description,
-        jobType: job.jobType,
-        experienceLevel: job.experienceLevel,
-        salary: job.salary
-      }));
+    if (!Array.isArray(interactions) || interactions.length === 0) {
+      return res.status(400).json({ error: { code: "INVALID_INTERACTIONS" } });
     }
 
-    // 직무 타입 필터링
-    let filteredJobs = allJobs;
-    if (jobType !== '전체') {
-      filteredJobs = allJobs.filter(job => job.jobType === jobType);
-    }
+    // 상호작용 데이터 추가
+    recommendationEngine.addInteractions(interactions);
 
-    // 경력 수준 필터링
-    if (experienceLevel !== '전체') {
-      filteredJobs = filteredJobs.filter(job =>
-        job.experienceLevel?.includes(experienceLevel) || experienceLevel === '전체'
-      );
-    }
+    // 모델 훈련
+    console.log('[추천 엔진] 훈련 시작...');
+    await recommendationEngine.train();
+    console.log('[추천 엔진] 훈련 완료');
 
-    if (!filteredJobs.length) {
-      return res.json({ items: [] });
-    }
-
-    console.log(`[MAIN-RECS] Requesting main page recommendations for ${filteredJobs.length} jobs, jobType: ${jobType}`);
-
-    const { data } = await axios.post(
-      `${process.env.MCP_RECS_BASE}/tools/gpt_main_recommendations`,
-      {
-        jobListings: filteredJobs,
-        topK: Math.min(Number(top) || 10, 20),
-        jobTypeFilter: jobType,
-        experienceFilter: experienceLevel,
-        context: 'main_page_trending'
-      },
-      { timeout: 20000 }
-    );
-
-    if (data?.recommendations) {
-      res.json({
-        items: data.recommendations,
-        job_type_filter: jobType,
-        experience_filter: experienceLevel,
-        total_analyzed: filteredJobs.length,
-        recommendation_strategy: 'gpt_main_trending',
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      res.status(500).json({ error: { code: "MAIN_RECS_NO_DATA" } });
-    }
-
+    res.json({
+      success: true,
+      stats: recommendationEngine.getStatistics(),
+      message: '추천 엔진 훈련이 완료되었습니다.'
+    });
   } catch (e) {
-    console.error("[MAIN-RECS] Error:", e.response?.data || e.message);
-    res.status(500).json({ error: { code: "MAIN_RECS_FAILED" } });
+    console.error("[train-recommendation-engine error]", e);
+    res.status(500).json({ error: { code: "TRAINING_FAILED" } });
+  }
+});
+
+/**
+ * @swagger
+ * /api/recommendation-stats:
+ *   get:
+ *     summary: 추천 엔진 통계 조회
+ *     tags: [Advanced Recommendations]
+ *     responses:
+ *       200:
+ *         description: 추천 엔진 통계
+ */
+app.get("/api/recommendation-stats", (req, res) => {
+  try {
+    const stats = recommendationEngine.getStatistics();
+    res.json(stats);
+  } catch (e) {
+    console.error("[recommendation-stats error]", e);
+    res.status(500).json({ error: { code: "STATS_FAILED" } });
   }
 });
 
@@ -1033,13 +933,13 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
   }
 });
 
-/* -------------------- GPT MCP 기반 맞춤 면접 -------------------- */
+/* -------------------- 맞춤 면접 -------------------- */
 /**
  * @swagger
  * /session/interview:
  *   get:
- *     summary: GPT MCP 기반 회사별 맞춤 면접 질문 생성
- *     tags: [GPT Recommendations]
+ *     summary: 회사별 맞춤 면접 질문 생성
+ *     tags: [Interview Questions]
  *     parameters:
  *       - in: query
  *         name: sessionId
@@ -1053,22 +953,9 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
  *         schema:
  *           type: string
  *         description: 채용공고 ID
- *       - in: query
- *         name: questionCount
- *         schema:
- *           type: integer
- *           default: 8
- *         description: 생성할 질문 개수
- *       - in: query
- *         name: difficulty
- *         schema:
- *           type: string
- *           enum: [beginner, intermediate, advanced, mixed]
- *           default: mixed
- *         description: 면접 난이도 레벨
  *     responses:
  *       200:
- *         description: GPT 기반 맞춤 면접 질문 생성 완료
+ *         description: 맞춤 면접 질문 생성 완료
  *         content:
  *           application/json:
  *             schema:
@@ -1079,42 +966,16 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
  *                   items:
  *                     type: object
  *                     properties:
- *                       id:
- *                         type: integer
  *                       question:
  *                         type: string
  *                       category:
  *                         type: string
  *                       difficulty:
  *                         type: string
- *                       expected_answer_points:
- *                         type: array
- *                         items:
- *                           type: string
- *                       tips:
- *                         type: string
- *                 interview_strategy:
+ *                 company_info:
  *                   type: object
- *                   properties:
- *                     company_focus:
- *                       type: string
- *                     key_preparation_areas:
- *                       type: array
- *                       items:
- *                         type: string
- *                     personalization_insights:
- *                       type: string
- *                 job_match_analysis:
+ *                 job_info:
  *                   type: object
- *                   properties:
- *                     strength_areas:
- *                       type: array
- *                       items:
- *                         type: string
- *                     growth_opportunities:
- *                       type: array
- *                       items:
- *                         type: string
  *       400:
  *         description: 필수 파라미터 누락 또는 잘못된 요청
  *       404:
@@ -1124,84 +985,40 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
  */
 app.get("/session/interview", async (req, res) => {
   try {
-    const { sessionId, jobId, questionCount = 8, difficulty = 'mixed' } = req.query;
+    const { sessionId, jobId } = req.query;
     const s = ensureSession(String(sessionId));
-
-    if (!s.user) {
-      return res.status(400).json({ error: { code: "NO_USER_PROFILE" } });
-    }
-
     const job = s.jobs.find(j => j.job_id === jobId);
     if (!job) return res.status(404).json({ error: { code: "JOB_NOT_FOUND" } });
 
     const company = s.companies.find(c => c.company_id === job.company_id) || null;
 
-    console.log(`[GPT-INTERVIEW] Generating ${questionCount} questions for ${job.company} - ${job.title} (difficulty: ${difficulty})`);
-
     const { data } = await axios.post(
-      `${process.env.MCP_RECS_BASE}/tools/gpt_generate_interview`,
+      `${process.env.MCP_RECS_BASE}/tools/generate_interview`,
       {
-        sessionId: String(sessionId),
-        userProfile: {
-          skills: s.user.skills || [],
-          years: s.user.years,
-          region: s.user.region,
-          role: s.user.role,
-          resumeHints: s.user.resumeHints,
-          resumeText: s.user.resumeText
+        user: {
+          skills: s.user?.skills,
+          years: s.user?.years,
+          region: s.user?.region,
+          role: s.user?.role,
+          resumeHints: s.user?.resumeHints,
         },
-        jobDetails: {
-          job_id: job.job_id,
+        job: {
           title: job.title,
-          company: job.company,
-          skills: job.skills || [],
+          skills: job.skills,
           region: job.region,
           years_min: job.years_min,
           years_max: job.years_max,
           description: job.description,
-          requirements: job.requirements || null
         },
-        companyInfo: company ? {
-          company_id: company.company_id,
-          name: company.name,
-          overview: company.overview,
-          culture: company.culture,
-          values: company.values
-        } : null,
-        interviewConfig: {
-          questionCount: Math.min(Number(questionCount) || 8, 15),
-          difficulty: difficulty,
-          includeCompanySpecific: !!company,
-          includeTechnicalQuestions: true,
-          includeBehavioralQuestions: true,
-          includeRoleSpecificQuestions: true
-        }
+        company,
       },
-      { timeout: 35000 }
+      { timeout: 25000 }
     );
 
-    if (data?.interview) {
-      res.json({
-        success: true,
-        job_info: {
-          job_id: job.job_id,
-          title: job.title,
-          company: job.company,
-          skills: job.skills
-        },
-        questions: data.interview.questions || [],
-        interview_strategy: data.interview.strategy || null,
-        job_match_analysis: data.interview.job_match_analysis || null,
-        generated_at: new Date().toISOString(),
-        generation_method: 'gpt_mcp_enhanced'
-      });
-    } else {
-      res.status(500).json({ error: { code: "INTERVIEW_NO_DATA" } });
-    }
-
+    res.json(data);
   } catch (e) {
-    console.error("[GPT-INTERVIEW] Error:", e.response?.data || e.message);
-    res.status(500).json({ error: { code: "GPT_INTERVIEW_FAILED" } });
+    console.error(e);
+    res.status(500).json({ error: { code: "INTERVIEW_FAILED" } });
   }
 });
 
