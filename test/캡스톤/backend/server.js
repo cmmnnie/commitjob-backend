@@ -158,6 +158,9 @@ app.use(express.json());
 const resumeDir = path.join(process.cwd(), 'uploads', 'resume');
 fs.mkdirSync(resumeDir, { recursive: true });
 
+const coverLetterDir = path.join(process.cwd(), 'uploads', 'cover-letters');
+fs.mkdirSync(coverLetterDir, { recursive: true });
+
 const uploadDir = path.join(process.cwd(), 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -169,11 +172,37 @@ const diskStorage = multer.diskStorage({
     cb(null, `${userId}_${Date.now()}${ext}`);
   }
 });
+
+const coverLetterStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, coverLetterDir),
+  filename: (req, file, cb) => {
+    const userId = req.body.user_id || 'unknown';
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname || '.pdf');
+    cb(null, `cover_letter_${userId}_${timestamp}${ext}`);
+  }
+});
 const uploadProfile = multer({ storage: diskStorage });
+const uploadCoverLetter = multer({
+  storage: coverLetterStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB 제한
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.pdf', '.doc', '.docx', '.txt'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('지원하지 않는 파일 형식입니다. PDF, DOC, DOCX, TXT 파일만 업로드 가능합니다.'));
+    }
+  }
+});
 
 // 세션 인제스트용 (메모리)
 const uploadMem = multer({ storage: multer.memoryStorage() });
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/uploads/cover-letters', express.static(path.join(process.cwd(), 'uploads', 'cover-letters')));
 // --- MySQL 풀 ---
 import mysql from 'mysql2/promise';
 const pool = mysql.createPool({
@@ -215,6 +244,7 @@ if (allowedOrigins.length === 0) {
     'https://commitjob.site',
     'https://www.commitjob.site',
     'http://localhost:3000',
+    'http://localhost:4001',
     'http://localhost:5173',
     'http://localhost:5174',
     'http://commitjob.site'
@@ -662,12 +692,310 @@ app.post("/api/logout", (req, res) => {
 });
 
 /* ==================== 세션/프로필/인제스트 ==================== */
+
+/**
+ * @swagger
+ * /api/upload-cover-letter:
+ *   post:
+ *     summary: 자기소개서 파일 업로드
+ *     description: 사용자의 자기소개서 파일을 업로드합니다. PDF, DOC, DOCX, TXT 형식을 지원합니다.
+ *     tags: [사용자 프로필]
+ *     consumes:
+ *       - multipart/form-data
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_id
+ *               - cover_letter
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 description: 사용자 ID
+ *                 example: 1
+ *               cover_letter:
+ *                 type: string
+ *                 format: binary
+ *                 description: 자기소개서 파일 (PDF, DOC, DOCX, TXT)
+ *               job_id:
+ *                 type: string
+ *                 description: 특정 채용공고 ID (선택사항)
+ *                 example: "job_123"
+ *               company_name:
+ *                 type: string
+ *                 description: 지원 회사명 (선택사항)
+ *                 example: "네이버"
+ *     responses:
+ *       200:
+ *         description: 파일 업로드 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "자기소개서가 성공적으로 업로드되었습니다."
+ *                 file_path:
+ *                   type: string
+ *                   example: "/uploads/cover-letters/cover_letter_1_1640995200000.pdf"
+ *                 file_info:
+ *                   type: object
+ *                   properties:
+ *                     original_name:
+ *                       type: string
+ *                       example: "자기소개서.pdf"
+ *                     file_size:
+ *                       type: integer
+ *                       example: 1024000
+ *                     upload_date:
+ *                       type: string
+ *                       format: date-time
+ *       400:
+ *         description: 잘못된 요청 (사용자 ID 누락, 파일 누락, 지원하지 않는 파일 형식)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: object
+ *                   properties:
+ *                     code:
+ *                       type: string
+ *                       example: "MISSING_USER_ID"
+ *                     message:
+ *                       type: string
+ *                       example: "사용자 ID가 필요합니다."
+ *       404:
+ *         description: 사용자를 찾을 수 없음
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: object
+ *                   properties:
+ *                     code:
+ *                       type: string
+ *                       example: "USER_NOT_FOUND"
+ *                     message:
+ *                       type: string
+ *                       example: "사용자를 찾을 수 없습니다."
+ *       500:
+ *         description: 서버 오류
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: object
+ *                   properties:
+ *                     code:
+ *                       type: string
+ *                       example: "UPLOAD_FAILED"
+ *                     message:
+ *                       type: string
+ *                       example: "파일 업로드에 실패했습니다."
+ */
+app.post('/api/upload-cover-letter', uploadCoverLetter.single('cover_letter'), async (req, res) => {
+  try {
+    const { user_id, job_id, company_name } = req.body || {};
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: {
+          code: "MISSING_USER_ID",
+          message: "사용자 ID가 필요합니다."
+        }
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: {
+          code: "MISSING_FILE",
+          message: "자기소개서 파일이 필요합니다."
+        }
+      });
+    }
+
+    // 사용자 존재 확인
+    const user = await findUserById(user_id);
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: "USER_NOT_FOUND",
+          message: "사용자를 찾을 수 없습니다."
+        }
+      });
+    }
+
+    const filePath = `/uploads/cover-letters/${req.file.filename}`;
+    const uploadDate = new Date().toISOString();
+
+    // 데이터베이스에 파일 정보 저장 (선택사항 - 현재는 파일 경로만 반환)
+    // 실제 프로덕션에서는 cover_letters 테이블에 파일 정보를 저장할 수 있습니다.
+
+    console.log(`[COVER_LETTER] File uploaded for user ${user_id}: ${req.file.filename}`);
+
+    res.json({
+      success: true,
+      message: "자기소개서가 성공적으로 업로드되었습니다.",
+      file_path: filePath,
+      file_info: {
+        original_name: req.file.originalname,
+        file_size: req.file.size,
+        upload_date: uploadDate,
+        job_id: job_id || null,
+        company_name: company_name || null
+      }
+    });
+
+  } catch (error) {
+    console.error('[COVER_LETTER] Upload error:', error);
+
+    if (error.message.includes('지원하지 않는 파일 형식')) {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_FILE_TYPE",
+          message: error.message
+        }
+      });
+    }
+
+    res.status(500).json({
+      error: {
+        code: "UPLOAD_FAILED",
+        message: "파일 업로드에 실패했습니다."
+      }
+    });
+  }
+});
 app.post("/session/start", (req, res) => {
   const sid = newSessionId();
   sessions.set(sid, { user: null, jobs: [], companies: [] });
   res.json({ sessionId: sid });
 });
 
+/**
+ * @swagger
+ * /api/profile:
+ *   post:
+ *     summary: 사용자 프로필 정보 저장/업데이트
+ *     description: 사용자의 프로필 정보를 저장하거나 업데이트합니다. 이력서 파일 업로드도 함께 처리할 수 있습니다.
+ *     tags: [사용자 프로필]
+ *     consumes:
+ *       - multipart/form-data
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_id
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 description: 사용자 ID
+ *                 example: 1
+ *               jobs:
+ *                 type: string
+ *                 description: 희망직무
+ *                 example: "백엔드 개발자"
+ *               careers:
+ *                 type: string
+ *                 description: 경력
+ *                 example: "1-3년"
+ *               regions:
+ *                 type: string
+ *                 description: 희망근무지역 (단일 지역, 배열로 저장됨)
+ *                 example: "서울"
+ *               skills:
+ *                 type: string
+ *                 description: 기술스택 (쉼표로 구분)
+ *                 example: "Node.js, React, MySQL"
+ *               resume:
+ *                 type: string
+ *                 format: binary
+ *                 description: 이력서 파일 (선택사항)
+ *     responses:
+ *       201:
+ *         description: 프로필 저장/업데이트 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user_id:
+ *                   type: integer
+ *                   example: 1
+ *                 jobs:
+ *                   type: string
+ *                   example: "백엔드 개발자"
+ *                 careers:
+ *                   type: string
+ *                   example: "1-3년"
+ *                 regions:
+ *                   type: string
+ *                   example: "서울"
+ *                 skills:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["Node.js", "React", "MySQL"]
+ *                 resume_path:
+ *                   type: string
+ *                   nullable: true
+ *                   example: "/uploads/resume/1_1640995200000.pdf"
+ *                 created_at:
+ *                   type: string
+ *                   format: date-time
+ *                 updated_at:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: 잘못된 요청 (사용자 ID 누락 등)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: object
+ *                   properties:
+ *                     code:
+ *                       type: string
+ *                       example: "MISSING_USER_ID"
+ *                     message:
+ *                       type: string
+ *                       example: "profile set failed"
+ *       404:
+ *         description: 사용자를 찾을 수 없음
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: object
+ *                   properties:
+ *                     code:
+ *                       type: string
+ *                       example: "USER_NOT_FOUND"
+ *                     message:
+ *                       type: string
+ *                       example: "User not found"
+ */
 app.post('/api/profile', uploadProfile.single('resume'), async (req, res) => {
   try {
     const {
@@ -972,7 +1300,7 @@ app.get("/session/recs", async (req, res) => {
  *                     - id: "job_123"
  *                       title: "백엔드 개발자 (Node.js)"
  *                       company: "네이버"
- *                       location: "서울"
+ *                       location: ["서울"]
  *                       experience: "1-3년"
  *                       skills: ["Node.js", "Express", "MySQL"]
  *                       salary: "3000-4500만원"
@@ -1015,14 +1343,14 @@ app.get("/session/recs", async (req, res) => {
  *                     - id: "job_456"
  *                       title: "데이터 엔지니어"
  *                       company: "카카오"
- *                       location: "서울"
+ *                       location: ["서울"]
  *                       experience: "신입-2년"
  *                       skills: ["Python", "Spark", "Kafka"]
  *                       salary: "3500-5000만원"
  *                     - id: "job_457"
  *                       title: "ML 엔지니어"
  *                       company: "네이버"
- *                       location: "서울"
+ *                       location: ["서울"]
  *                       experience: "3-5년"
  *                       skills: ["Python", "TensorFlow", "Kubernetes"]
  *       500:
@@ -1138,16 +1466,16 @@ app.get("/api/main-recommendations", async (req, res) => {
     // 데모 데이터를 IT와 빅데이터로 분류
     const itJobs = allJobs.filter(job =>
       job.jobType === 'IT' ||
-      job.skills.some(skill =>
+      (job.skills && job.skills.some(skill =>
         ['JavaScript', 'Node.js', 'React', 'Vue.js', 'Java', 'Spring', 'Python', 'Django', 'Flask'].includes(skill)
-      )
+      ))
     ).slice(0, 10);
 
     const bigDataJobs = allJobs.filter(job =>
       job.jobType === '빅데이터' ||
-      job.skills.some(skill =>
+      (job.skills && job.skills.some(skill =>
         ['Python', 'R', 'Spark', 'Kafka', 'Hadoop', 'TensorFlow', 'PyTorch', 'SQL', 'MongoDB'].includes(skill)
-      )
+      ))
     ).slice(0, 10);
 
     const response = {
@@ -1287,9 +1615,11 @@ app.post("/api/company-info", async (req, res) => {
  *                 description: 조회할 기업명
  *                 example: "삼성전자"
  *               job_position:
- *                 type: string
- *                 description: 조회할 직무 (선택사항)
- *                 example: "소프트웨어 엔지니어"
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: 조회할 직무 목록 (선택사항)
+ *                 example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *     responses:
  *       200:
  *         description: 자소서 정보 조회 성공
@@ -1305,8 +1635,10 @@ app.post("/api/company-info", async (req, res) => {
  *                   type: string
  *                   example: "삼성전자"
  *                 job_position:
- *                   type: string
- *                   example: "소프트웨어 엔지니어"
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *                 data:
  *                   type: object
  *                   description: 자소서 정보 데이터
@@ -1362,7 +1694,7 @@ app.post("/api/job-essays", async (req, res) => {
       res.json({
         success: true,
         company_name,
-        job_position: job_position || 'All positions',
+        job_position: job_position ? (Array.isArray(job_position) ? job_position : [job_position]) : ['All positions'],
         data: response.data,
         timestamp: new Date().toISOString()
       });
@@ -1397,9 +1729,11 @@ app.post("/api/job-essays", async (req, res) => {
  *                 description: 조회할 기업명
  *                 example: "삼성전자"
  *               job_position:
- *                 type: string
- *                 description: 조회할 직무 (선택사항)
- *                 example: "소프트웨어 엔지니어"
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: 조회할 직무 목록 (선택사항)
+ *                 example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *     responses:
  *       200:
  *         description: 지원 꿀팁 정보 조회 성공
@@ -1415,8 +1749,10 @@ app.post("/api/job-essays", async (req, res) => {
  *                   type: string
  *                   example: "삼성전자"
  *                 job_position:
- *                   type: string
- *                   example: "소프트웨어 엔지니어"
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *                 data:
  *                   type: object
  *                   description: 지원 꿀팁 정보 데이터
@@ -1472,7 +1808,7 @@ app.post("/api/job-tips", async (req, res) => {
       res.json({
         success: true,
         company_name,
-        job_position: job_position || 'All positions',
+        job_position: job_position ? (Array.isArray(job_position) ? job_position : [job_position]) : ['All positions'],
         data: response.data,
         timestamp: new Date().toISOString()
       });
@@ -1507,9 +1843,11 @@ app.post("/api/job-tips", async (req, res) => {
  *                 description: 조회할 기업명
  *                 example: "삼성전자"
  *               job_position:
- *                 type: string
- *                 description: 조회할 직무 (선택사항)
- *                 example: "소프트웨어 엔지니어"
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: 조회할 직무 목록 (선택사항)
+ *                 example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *     responses:
  *       200:
  *         description: 종합 취업 정보 조회 성공
@@ -1525,8 +1863,10 @@ app.post("/api/job-tips", async (req, res) => {
  *                   type: string
  *                   example: "삼성전자"
  *                 job_position:
- *                   type: string
- *                   example: "소프트웨어 엔지니어"
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["소프트웨어 엔지니어", "데이터 사이언티스트"]
  *                 timestamp:
  *                   type: string
  *                   format: date-time
@@ -1591,7 +1931,7 @@ app.post("/api/comprehensive-job-info", async (req, res) => {
     const result = {
       success: true,
       company_name,
-      job_position: job_position || 'All positions',
+      job_position: job_position ? (Array.isArray(job_position) ? job_position : [job_position]) : ['All positions'],
       timestamp: new Date().toISOString(),
       data: {
         company_info: companyInfo.status === 'fulfilled' && companyInfo.value.data?.success ? companyInfo.value.data : null,
@@ -1840,7 +2180,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         companyName: '네이버',
         title: '백엔드 개발자',
         requiredSkills: ['Node.js', 'Express', 'MySQL', 'AWS'],
-        location: '서울',
+        location: ['서울'],
         experienceLevel: '신입',
         jobType: 'IT',
         description: 'Node.js 기반 백엔드 시스템 개발',
@@ -1852,7 +2192,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         companyName: '카카오',
         title: '프론트엔드 개발자',
         requiredSkills: ['React', 'JavaScript', 'TypeScript', 'CSS'],
-        location: '서울',
+        location: ['서울'],
         experienceLevel: '신입',
         jobType: 'IT',
         description: 'React 기반 웹 프론트엔드 개발',
@@ -1864,7 +2204,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         companyName: '삼성전자',
         title: '빅데이터 엔지니어',
         requiredSkills: ['Python', 'Spark', 'Hadoop', 'SQL'],
-        location: '서울',
+        location: ['서울'],
         experienceLevel: '경력 1-3년',
         jobType: '빅데이터',
         description: '대용량 데이터 처리 및 분석 시스템 구축',
@@ -1876,7 +2216,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         companyName: '엔씨소프트',
         title: '게임 클라이언트 개발자',
         requiredSkills: ['C++', 'Unity', 'C#', 'DirectX'],
-        location: '서울',
+        location: ['서울'],
         experienceLevel: '신입',
         jobType: 'IT',
         description: '모바일/PC 게임 클라이언트 개발',
@@ -1888,7 +2228,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         companyName: '쿠팡',
         title: '데이터 사이언티스트',
         requiredSkills: ['Python', 'TensorFlow', 'PyTorch', 'SQL'],
-        location: '서울',
+        location: ['서울'],
         experienceLevel: '경력 2-5년',
         jobType: '빅데이터',
         description: '머신러닝 모델 개발 및 데이터 분석',
@@ -1903,7 +2243,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         email: 'demo1@test.com',
         name: '김개발',
         skills: ['Node.js', 'React', 'MySQL'],
-        preferredLocation: '서울',
+        preferredLocation: ['서울'],
         experienceLevel: '신입',
         preferredJobType: 'IT'
       },
@@ -1912,7 +2252,7 @@ app.post("/api/setup-demo-data", async (req, res) => {
         email: 'demo2@test.com',
         name: '이데이터',
         skills: ['Python', 'SQL', 'TensorFlow'],
-        preferredLocation: '서울',
+        preferredLocation: ['서울'],
         experienceLevel: '경력 1-3년',
         preferredJobType: '빅데이터'
       }
@@ -2067,6 +2407,247 @@ app.use((req, res) => {
 
 
 /* -------------------- 서버 시작 -------------------- */
+/**
+ * @swagger
+ * /api/cover-letter/upload:
+ *   post:
+ *     summary: 자기소개서 파일 업로드
+ *     description: 사용자의 자기소개서 파일을 업로드합니다.
+ *     tags: [Cover Letter]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_id
+ *               - cover_letter
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 description: 사용자 ID
+ *                 example: 1
+ *               cover_letter:
+ *                 type: string
+ *                 format: binary
+ *                 description: 자기소개서 파일 (PDF, DOC, DOCX, TXT)
+ *     responses:
+ *       201:
+ *         description: 자기소개서 업로드 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "자기소개서가 성공적으로 업로드되었습니다"
+ *                 file_path:
+ *                   type: string
+ *                   example: "/uploads/cover_letter/cover_letter_1_1640995200000.pdf"
+ *       400:
+ *         description: 잘못된 요청
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "사용자 ID와 파일이 필요합니다"
+ *       413:
+ *         description: 파일 크기 초과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "파일 크기가 10MB를 초과할 수 없습니다"
+ */
+app.post('/api/cover-letter/upload', uploadCoverLetter.single('cover_letter'), async (req, res) => {
+  try {
+    const { user_id } = req.body;
+    const file = req.file;
+
+    if (!user_id || !file) {
+      return res.status(400).json({
+        error: '사용자 ID와 파일이 필요합니다'
+      });
+    }
+
+    const filePath = `/uploads/cover_letter/${file.filename}`;
+
+    res.status(201).json({
+      success: true,
+      message: '자기소개서가 성공적으로 업로드되었습니다',
+      file_path: filePath
+    });
+
+  } catch (error) {
+    console.error('Cover letter upload error:', error);
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: '파일 크기가 10MB를 초과할 수 없습니다'
+      });
+    }
+    res.status(500).json({
+      error: '자기소개서 업로드 중 오류가 발생했습니다'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/cover-letter/download/{filename}:
+ *   get:
+ *     summary: 자기소개서 파일 다운로드
+ *     description: 업로드된 자기소개서 파일을 다운로드합니다.
+ *     tags: [Cover Letter]
+ *     parameters:
+ *       - in: path
+ *         name: filename
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 다운로드할 파일명
+ *         example: cover_letter_1_1640995200000.pdf
+ *     responses:
+ *       200:
+ *         description: 파일 다운로드 성공
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: 파일을 찾을 수 없음
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "파일을 찾을 수 없습니다"
+ */
+app.get('/api/cover-letter/download/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filepath = path.join(uploadDir, 'cover_letter', filename);
+
+    if (fs.existsSync(filepath)) {
+      res.download(filepath);
+    } else {
+      res.status(404).json({
+        error: '파일을 찾을 수 없습니다'
+      });
+    }
+  } catch (error) {
+    console.error('Cover letter download error:', error);
+    res.status(500).json({
+      error: '파일 다운로드 중 오류가 발생했습니다'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/cover-letter/list/{user_id}:
+ *   get:
+ *     summary: 사용자 자기소개서 파일 목록 조회
+ *     description: 특정 사용자가 업로드한 자기소개서 파일 목록을 조회합니다.
+ *     tags: [Cover Letter]
+ *     parameters:
+ *       - in: path
+ *         name: user_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: 사용자 ID
+ *         example: 1
+ *     responses:
+ *       200:
+ *         description: 파일 목록 조회 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 files:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       filename:
+ *                         type: string
+ *                         example: cover_letter_1_1640995200000.pdf
+ *                       upload_time:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2021-12-31T12:00:00.000Z"
+ *                       size:
+ *                         type: integer
+ *                         example: 1048576
+ *       404:
+ *         description: 파일을 찾을 수 없음
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 files:
+ *                   type: array
+ *                   items: {}
+ *                   example: []
+ */
+app.get('/api/cover-letter/list/:user_id', (req, res) => {
+  try {
+    const userId = req.params.user_id;
+    const coverLetterDir = path.join(uploadDir, 'cover_letter');
+
+    if (!fs.existsSync(coverLetterDir)) {
+      return res.json({ success: true, files: [] });
+    }
+
+    const files = fs.readdirSync(coverLetterDir)
+      .filter(filename => filename.startsWith(`cover_letter_${userId}_`))
+      .map(filename => {
+        const filepath = path.join(coverLetterDir, filename);
+        const stats = fs.statSync(filepath);
+
+        return {
+          filename,
+          upload_time: stats.mtime.toISOString(),
+          size: stats.size
+        };
+      })
+      .sort((a, b) => new Date(b.upload_time) - new Date(a.upload_time));
+
+    res.json({
+      success: true,
+      files
+    });
+
+  } catch (error) {
+    console.error('Cover letter list error:', error);
+    res.status(500).json({
+      error: '파일 목록 조회 중 오류가 발생했습니다'
+    });
+  }
+});
+
 // 변경: IPv4 로컬호스트에 확실히 바인딩
 // --- listen
 
