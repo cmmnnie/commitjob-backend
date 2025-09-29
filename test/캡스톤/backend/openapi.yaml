@@ -1,74 +1,18 @@
-openapi: 3.0.3
-info:
-  title: "CommitJob Auth API (Google & Kakao OAuth)"
-  version: "1.0.0"
-  description: |
-    CommitJob의 소셜 로그인(Google/Kakao)과 세션 관리 API 명세입니다.
-    - 로그인 시작: /auth/google, /auth/kakao (302 Redirect)
-    - 콜백: /auth/google/callback, /auth/kakao/callback (302 Redirect back to origin)
-    - 세션 조회: /api/me
-    - 로그아웃: /api/logout
-
-servers:
-  - url: "http://localhost:3001"
-    description: "Local"
-  - url: "https://commitjob.site"
-    description: "Production"
+# 기존 Auth API 경로 정의만 유지 (components와 info는 server.js에서 정의됨)
 
 tags:
   - name: "Auth"
     description: "OAuth 인증 및 세션 관리 API"
-
-components:
-  securitySchemes:
-    cookieAuth:
-      type: apiKey
-      in: cookie
-      name: app_session
-
-  schemas:
-    User:
-      type: object
-      properties:
-        id:
-          type: integer
-          example: 1
-        email:
-          type: string
-          nullable: true
-          example: "user@example.com"
-        name:
-          type: string
-          nullable: true
-          example: "홍길동"
-        picture:
-          type: string
-          nullable: true
-          example: "https://example.com/avatar.png"
-        provider:
-          type: string
-          enum: ["google", "kakao"]
-          example: "google"
-
-    Ok:
-      type: object
-      properties:
-        ok:
-          type: boolean
-          example: true
-
-    Error:
-      type: object
-      properties:
-        error:
-          type: object
-          properties:
-            code:
-              type: string
-              example: "INVALID_STATE"
-            message:
-              type: string
-              example: "state mismatch"
+  - name: "Profile"
+    description: "사용자 프로필 관리 API"
+  - name: "GPT Recommendations"
+    description: "GPT MCP 기반 개인화된 채용공고 추천 API"
+  - name: "Interview"
+    description: "GPT MCP 기반 개인화된 면접 질문 생성 API"
+  - name: "Job Data Collection"
+    description: "캐치 기반 기업정보 및 취업 데이터 수집 API"
+  - name: "Health"
+    description: "헬스체크 API"
 
 paths:
   /auth/google:
@@ -174,9 +118,23 @@ paths:
                 type: object
                 properties:
                   user:
-                    oneOf:
-                      - type: "null"
+                    nullable: true
+                    allOf:
                       - $ref: "#/components/schemas/User"
+                examples:
+                  logged_in:
+                    summary: "로그인된 사용자"
+                    value:
+                      user:
+                        id: 1
+                        email: "user@example.com"
+                        name: "홍길동"
+                        picture: "https://example.com/avatar.png"
+                        provider: "google"
+                  not_logged_in:
+                    summary: "로그인되지 않은 사용자"
+                    value:
+                      user: null
         "401":
           description: "세션 없음/만료"
           content:
@@ -205,18 +163,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
-info:
-  title: CommitJob API
-  version: 0.1.0
-servers:
-  - url: /api
-tags:
-  - name: Health
-  - name: Profile
-  - name: Recommendation
-  - name: Interview
-
-paths:
   /health:
     get:
       tags: [Health]
@@ -232,23 +178,25 @@ paths:
                   status: { type: string, example: ok }
                   message: { type: string, example: Backend is healthy! }
 
-  /profile:
+  /api/profile:
     post:
       tags: [Profile]
-      summary: 사용자 프로필 저장 (필수 3개 + 자기소개서 파일)
+      summary: 사용자 프로필 저장 (DB 기반)
       description: >
-        프론트는 상세 입력 UI를 제공하지만, 백엔드는 **선택값만 저장**합니다.
+        사용자 프로필 정보를 DB에 저장합니다.
         파일은 multipart/form-data 로 업로드하여 서버에 저장하고 DB에는 경로만 저장합니다.
+        자기소개서 파일은 선택사항입니다.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [user_id, jobs, careers, regions, resume]
+              required: [user_id]
               properties:
                 user_id:
                   type: integer
+                  description: 사용자 ID
                   example: 1
                 jobs:
                   type: string
@@ -263,10 +211,14 @@ paths:
                   type: string
                   description: 지역(선택값)
                   example: 서울
+                skills:
+                  type: string
+                  description: 기술스택(쉼표 구분, 선택값)
+                  example: JavaScript, React, Node.js
                 resume:
                   type: string
                   format: binary
-                  description: 자기소개서 파일
+                  description: 자기소개서 파일 (선택사항)
       responses:
         '201':
           description: 저장 성공
@@ -279,73 +231,552 @@ paths:
         '500':
           description: 서버 오류
 
-  /recommendations:
+  /api/main-recommendations:
     get:
-      tags: [Recommendation]
-      summary: 맞춤형 공고 추천
-      description: 저장된 프로필 기반 추천. (현재 스텁 응답)
+      tags: ["GPT Recommendations"]
+      summary: "메인 페이지용 맞춤 IT/빅데이터 추천"
+      description: "GPT MCP 기반으로 사용자 프로필에 맞는 IT/빅데이터 채용공고를 추천합니다."
       parameters:
-        - name: user_id
-          in: query
+        - in: query
+          name: user_id
           required: true
-          schema: { type: integer, example: 1 }
+          description: "사용자 ID"
+          schema:
+            type: integer
+            example: 1
+        - in: query
+          name: jobType
+          required: false
+          description: "추천할 직무 타입 (IT 10개, 빅데이터 10개)"
+          schema:
+            type: string
+            enum: ["IT", "빅데이터", "전체"]
+            default: "전체"
+            example: "전체"
       responses:
-        '200':
-          description: 추천 리스트
+        "200":
+          description: "사용자 맞춤 메인 페이지 추천 결과"
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/JobRecommendation'
+                type: object
+                properties:
+                  IT:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "job_123"
+                        title:
+                          type: string
+                          example: "백엔드 개발자 (Node.js)"
+                        company:
+                          type: string
+                          example: "네이버"
+                        location:
+                          type: string
+                          example: "서울"
+                        experience:
+                          type: string
+                          example: "1-3년"
+                        skills:
+                          type: array
+                          items:
+                            type: string
+                          example: ["Node.js", "Express", "MySQL"]
+                        salary:
+                          type: string
+                          example: "3000-4500만원"
+                  빅데이터:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "job_456"
+                        title:
+                          type: string
+                          example: "데이터 엔지니어"
+                        company:
+                          type: string
+                          example: "카카오"
+                        location:
+                          type: string
+                          example: "서울"
+                        experience:
+                          type: string
+                          example: "신입-2년"
+                        skills:
+                          type: array
+                          items:
+                            type: string
+                          example: ["Python", "Spark", "Kafka"]
+                        salary:
+                          type: string
+                          example: "3500-5000만원"
+        "500":
+          description: "서버 오류"
 
-  /interview/questions:
+  /session/interview:
+    get:
+      tags: ["Interview"]
+      summary: "GPT MCP 기반 회사별 맞춤 면접 질문 생성"
+      description: "사용자 프로필과 채용공고 정보를 바탕으로 개인화된 면접 질문을 생성합니다."
+      parameters:
+        - in: query
+          name: user_id
+          required: true
+          description: "사용자 ID"
+          schema:
+            type: integer
+            example: 1
+        - in: query
+          name: jobId
+          required: true
+          description: "채용공고 ID"
+          schema:
+            type: string
+            example: "job_123"
+        - in: query
+          name: questionCount
+          required: false
+          description: "생성할 질문 개수"
+          schema:
+            type: integer
+            default: 8
+            example: 8
+        - in: query
+          name: difficulty
+          required: false
+          description: "면접 난이도 레벨"
+          schema:
+            type: string
+            enum: ["beginner", "intermediate", "advanced", "mixed"]
+            default: "mixed"
+            example: "mixed"
+      responses:
+        "200":
+          description: "맞춤 면접 질문 생성 완료"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                        question:
+                          type: string
+                          example: "Node.js와 Express를 사용한 RESTful API 개발 경험에 대해 설명해주세요."
+                        category:
+                          type: string
+                          example: "기술"
+                        difficulty:
+                          type: string
+                          example: "intermediate"
+                        expectedAnswer:
+                          type: string
+                          example: "Express 프레임워크의 미들웨어 구조와 라우팅 시스템을 활용한 API 설계 경험"
+        "400":
+          description: "잘못된 요청"
+        "404":
+          description: "채용공고를 찾을 수 없음"
+        "500":
+          description: "서버 오류"
+
+  /api/company-info:
     post:
-      tags: [Interview]
-      summary: 면접 예상 질문 생성
-      description: 저장된 프로필(직무/경력/지역) 기준의 샘플 질문. (현재 스텁 응답)
+      tags: ["Job Data Collection"]
+      summary: "기업 종합 정보 조회"
+      description: "캐치 기반으로 특정 기업의 종합 정보 (리뷰, 평점, 복지 등)를 조회합니다."
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [user_id]
+              required: [company_name]
               properties:
-                user_id:
-                  type: integer
-                  example: 1
+                company_name:
+                  type: string
+                  description: "조회할 기업명"
+                  example: "네이버"
       responses:
-        '200':
-          description: 질문 리스트
+        "200":
+          description: "기업 정보 조회 성공"
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    question: { type: string, example: 최근 프로젝트에서 성과를 수치로 설명해 주세요. }
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  company_name:
+                    type: string
+                    example: "네이버"
+                  data:
+                    type: object
+                    description: "기업 상세 정보 (리뷰, 평점, 복지 등)"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-15T10:30:00.000Z"
+        "400":
+          description: "필수 파라미터 누락"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "MISSING_COMPANY_NAME"
+        "500":
+          description: "서버 오류"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "COMPANY_INFO_FAILED"
+
+  /api/job-essays:
+    post:
+      tags: ["Job Data Collection"]
+      summary: "합격 자기소개서 정보 조회"
+      description: "캐치 기반으로 특정 기업/직무의 합격 자기소개서 정보를 조회합니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_name]
+              properties:
+                company_name:
+                  type: string
+                  description: "조회할 기업명"
+                  example: "카카오"
+                job_position:
+                  type: string
+                  description: "조회할 직무 (선택사항)"
+                  example: "백엔드 개발자"
+      responses:
+        "200":
+          description: "자기소개서 정보 조회 성공"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  company_name:
+                    type: string
+                    example: "카카오"
+                  job_position:
+                    type: string
+                    example: "백엔드 개발자"
+                  data:
+                    type: object
+                    description: "합격 자기소개서 정보"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-15T10:30:00.000Z"
+        "400":
+          description: "필수 파라미터 누락"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "MISSING_COMPANY_NAME"
+        "500":
+          description: "서버 오류"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "JOB_ESSAYS_FAILED"
+
+  /api/job-tips:
+    post:
+      tags: ["Job Data Collection"]
+      summary: "지원 꿀팁 정보 조회"
+      description: "캐치 기반으로 특정 기업/직무의 지원 꿀팁 정보를 조회합니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_name]
+              properties:
+                company_name:
+                  type: string
+                  description: "조회할 기업명"
+                  example: "토스"
+                job_position:
+                  type: string
+                  description: "조회할 직무 (선택사항)"
+                  example: "프론트엔드 개발자"
+      responses:
+        "200":
+          description: "꿀팁 정보 조회 성공"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  company_name:
+                    type: string
+                    example: "토스"
+                  job_position:
+                    type: string
+                    example: "프론트엔드 개발자"
+                  data:
+                    type: object
+                    description: "지원 꿀팁 정보"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-15T10:30:00.000Z"
+        "400":
+          description: "필수 파라미터 누락"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "MISSING_COMPANY_NAME"
+        "500":
+          description: "서버 오류"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "JOB_TIPS_FAILED"
+
+  /api/comprehensive-job-info:
+    post:
+      tags: ["Job Data Collection"]
+      summary: "종합 취업 정보 조회"
+      description: "캐치 기반으로 기업정보, 자기소개서, 꿀팁을 한 번에 조회합니다. 병렬 처리로 빠른 응답을 제공합니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_name]
+              properties:
+                company_name:
+                  type: string
+                  description: "조회할 기업명"
+                  example: "쿠팡"
+                job_position:
+                  type: string
+                  description: "조회할 직무 (선택사항)"
+                  example: "데이터 엔지니어"
+      responses:
+        "200":
+          description: "종합 정보 조회 성공"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  company_name:
+                    type: string
+                    example: "쿠팡"
+                  job_position:
+                    type: string
+                    example: "데이터 엔지니어"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-15T10:30:00.000Z"
+                  data:
+                    type: object
+                    properties:
+                      company_info:
+                        type: object
+                        nullable: true
+                        description: "기업 정보 (null일 경우 조회 실패)"
+                      job_essays:
+                        type: object
+                        nullable: true
+                        description: "자기소개서 정보 (null일 경우 조회 실패)"
+                      job_tips:
+                        type: object
+                        nullable: true
+                        description: "꿀팁 정보 (null일 경우 조회 실패)"
+        "400":
+          description: "필수 파라미터 누락"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "MISSING_COMPANY_NAME"
+        "500":
+          description: "서버 오류"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        example: "COMPREHENSIVE_INFO_FAILED"
 
 components:
   schemas:
     UserProfile:
       type: object
       properties:
-        id: { type: integer, example: 1 }
-        user_id: { type: integer, example: 1 }
-        jobs: { type: string, example: 백엔드 개발자 }
-        careers: { type: string, example: 1-3년 }
-        regions: { type: string, example: 서울 }
-        resume_path: { type: string, example: /uploads/resume/1_20250922.pdf }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    JobRecommendation:
+        id:
+          type: integer
+          description: 프로필 ID
+        user_id:
+          type: integer
+          description: 사용자 ID
+        preferred_jobs:
+          type: string
+          description: 희망직무
+          example: "백엔드 개발자"
+        experience:
+          type: string
+          description: 경력
+          example: "1-3년"
+        preferred_regions:
+          type: array
+          items:
+            type: string
+          description: 희망 지역
+          example: ["서울", "경기"]
+        skills:
+          type: array
+          items:
+            type: string
+          description: 기술스택
+          example: ["JavaScript", "React", "Node.js"]
+        resume_path:
+          type: string
+          nullable: true
+          description: 자기소개서 파일 경로 (선택사항)
+          example: "/uploads/resume/resume_123.pdf"
+        created_at:
+          type: string
+          format: date-time
+          description: 생성일시
+        updated_at:
+          type: string
+          format: date-time
+          description: 수정일시
+    User:
       type: object
       properties:
-        company:   { type: string, example: 커밋컴퍼니 }
-        title:     { type: string, example: 백엔드 개발자(노드/리눅스) }
-        location:  { type: string, example: 서울 }
-        match:     { type: number, example: 87, description: 매칭 점수(0-100) }
-        url:       { type: string, example: https://jobs.example.com/123 }
+        id:
+          type: integer
+          description: 사용자 ID
+        provider_key:
+          type: string
+          description: OAuth 제공자별 고유키
+        email:
+          type: string
+          description: 이메일
+        name:
+          type: string
+          description: 이름
+        picture:
+          type: string
+          description: 프로필 이미지 URL
+        provider:
+          type: string
+          enum: ["google", "kakao"]
+          description: OAuth 제공자
+        created_at:
+          type: string
+          format: date-time
+          description: 생성일시
+        updated_at:
+          type: string
+          format: date-time
+          description: 수정일시
+    Ok:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        message:
+          type: string
+          example: "Backend is healthy!"
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+
