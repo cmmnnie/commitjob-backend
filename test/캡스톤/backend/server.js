@@ -251,15 +251,6 @@ app.get(['/health', '/api/health', '/auth/health'], (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Backend is healthy!' });
 });
 
-// Debug endpoint to check CORS configuration
-app.get('/debug/cors', (req, res) => {
-  res.json({
-    allowedOrigins,
-    envFrontendOrigin: process.env.FRONTEND_ORIGIN,
-    envLength: (process.env.FRONTEND_ORIGIN || "").length
-  });
-});
-
 
 // 여러 프론트 오리진 허용
 const allowedOrigins = (process.env.FRONTEND_ORIGIN || "")
@@ -284,6 +275,15 @@ if (allowedOrigins.length === 0) {
     '*'
   );
 }
+
+// Debug endpoint to check CORS configuration
+app.get('/debug/cors', (req, res) => {
+  res.json({
+    allowedOrigins,
+    envFrontendOrigin: process.env.FRONTEND_ORIGIN,
+    envLength: (process.env.FRONTEND_ORIGIN || "").length
+  });
+});
 // state 보관 (google/kakao 공용)
 const stateStore = new Map(); // state -> origin
 
