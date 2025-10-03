@@ -461,7 +461,7 @@ app.get("/auth/kakao", (req, res) => {
   console.log('[KAKAO-AUTH] Request origin:', origin);
   console.log('[KAKAO-AUTH] Allowed origins:', allowedOrigins);
 
-  if (!origin || !allowedOrigins.includes(origin)) {
+  if (!origin || (!allowedOrigins.includes(origin) && !allowedOrigins.includes('*'))) {
     console.error('[KAKAO-AUTH] Bad origin:', origin);
     return res.status(400).send("Bad origin");
   }
@@ -491,7 +491,7 @@ app.get("/auth/kakao/login-url", (req, res) => {
   console.log('[KAKAO-LOGIN-URL] Request origin:', origin);
   console.log('[KAKAO-LOGIN-URL] Allowed origins:', allowedOrigins);
 
-  if (!origin || !allowedOrigins.includes(origin)) {
+  if (!origin || (!allowedOrigins.includes(origin) && !allowedOrigins.includes('*'))) {
     console.error('[KAKAO-LOGIN-URL] Bad origin:', origin);
     return res.status(400).json({ error: "Bad origin or missing origin query parameter" }); // JSON 응답으로 변경
   }
