@@ -17,22 +17,5 @@
         "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization"
       }
     }
-  ],
-  "env": {
-    "PORT": "4001",
-    "FRONTEND_ORIGIN": "https://commitjob.site,https://www.commitjob.site,http://localhost:3000,http://localhost:5173,http://localhost:5174",
-    "GOOGLE_CLIENT_ID": "807485751367-8i85jkhra9r279rl7csc1al10s3uonse.apps.googleusercontent.com",
-    "GOOGLE_CLIENT_SECRET": "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",
-    "GOOGLE_REDIRECT_URI": "https://commitjob.site/auth/google/callback",
-    "JWT_SECRET": "your_production_jwt_secret_here_make_it_strong",
-    "KAKAO_REST_API_KEY": "03bd5759c1e6f11d99bb13ff506af18c",
-    "KAKAO_REDIRECT_URI": "https://commitjob.site/auth/kakao/callback",
-    "MCP_INGEST_BASE": "https://commitjob.site",
-    "MCP_RECS_BASE": "https://commitjob.site",
-    "DB_HOST": "your_production_db_host",
-    "DB_PORT": "3306",
-    "DB_USER": "your_production_db_user",
-    "DB_PASS": "your_production_db_password",
-    "DB_NAME": "your_production_db_name"
-  }
+  ]
 }
