@@ -502,7 +502,17 @@ app.get("/auth/kakao/login-url", (req, res) => {
 
   if (!origin || (!allowedOrigins.includes(origin) && !allowedOrigins.includes('*'))) {
     console.error('[KAKAO-LOGIN-URL] Bad origin:', origin);
-    return res.status(400).json({ error: "Bad origin or missing origin query parameter" }); // JSON 응답으로 변경
+    console.error('[KAKAO-LOGIN-URL] allowedOrigins.includes(origin):', allowedOrigins.includes(origin));
+    console.error('[KAKAO-LOGIN-URL] allowedOrigins.includes("*"):', allowedOrigins.includes('*'));
+    return res.status(400).json({
+      error: "Bad origin or missing origin query parameter",
+      debug: {
+        received_origin: origin,
+        allowed_origins: allowedOrigins,
+        has_wildcard: allowedOrigins.includes('*'),
+        origin_in_list: allowedOrigins.includes(origin)
+      }
+    });
   }
 
   const state = crypto.randomUUID();
