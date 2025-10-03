@@ -4816,5 +4816,8 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not Found', path: req.originalUrl });
 });
 
+// Export for Vercel Serverless Functions
+export default app;
+
 // 변경: IPv4 로컬호스트에 확실히 바인딩
 // --- listen (이미 위에서 조건부로 실행됨)
