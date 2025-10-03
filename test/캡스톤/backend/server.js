@@ -320,6 +320,27 @@ const corsOptions = {
 console.log("[CORS] allowedOrigins =", allowedOrigins);
 // --- CORS 미들웨어는 "반드시" 라우트보다 먼저
 app.use(cors(corsOptions));
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'CommitJob Backend API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      kakao_login: '/auth/kakao/login-url',
+      recommendations: '/api/main-recommendations',
+      user_profile: '/api/user-profile'
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 /* -------------------- 임시 유저 저장소 -------------------- */
 
 // --- DB 기반 사용자 관리 함수들 ---
@@ -1500,29 +1521,20 @@ app.get("/api/main-recommendations", async (req, res) => {
       try {
         console.log('[MAIN-RECS] Catch 스크래퍼에서 실시간 공고 수집 중...');
 
-        // Catch 스크래퍼 초기화 및 로그인
-        try {
-          await axios.post('http://localhost:3000/api/init', {}, { timeout: 5000 });
-          console.log('[MAIN-RECS] Catch 스크래퍼 초기화 완료');
-        } catch (initErr) {
-          console.log('[MAIN-RECS] Catch 초기화 생략 (이미 초기화됨 또는 타임아웃)');
-        }
-
-        try {
-          await axios.post('http://localhost:3000/api/login', {
-            username: 'test0137',
-            password: '#test0808'
-          }, { timeout: 60000 }); // 로그인 타임아웃 60초로 증가
-          console.log('[MAIN-RECS] Catch 로그인 완료');
-          // 로그인 후 브라우저가 안정화될 때까지 대기
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        } catch (loginErr) {
-          console.log('[MAIN-RECS] Catch 로그인 생략 (이미 로그인됨 또는 타임아웃)');
-        }
+        //  homepage-jobs는 자체적으로 초기화/로그인/필터링을 처리하므로 직접 호출
+        console.log('[MAIN-RECS] Catch homepage-jobs API 호출 중 (자동 초기화/로그인/필터링 포함)...');
 
         const catchResponse = await axios.get('http://localhost:3000/api/homepage-jobs', {
           timeout: 200000 // 200초 타임아웃 (스크래핑 시간 고려)
         });
+
+        console.log('[DEBUG] Catch response keys:', Object.keys(catchResponse.data || {}));
+        console.log('[DEBUG] Has results?', !!catchResponse.data?.results);
+        if (catchResponse.data?.results) {
+          console.log('[DEBUG] Results keys:', Object.keys(catchResponse.data.results));
+          console.log('[DEBUG] it_jobs type:', typeof catchResponse.data.results.it_jobs, 'value:', catchResponse.data.results.it_jobs);
+          console.log('[DEBUG] bigdata_ai_jobs type:', typeof catchResponse.data.results.bigdata_ai_jobs, 'value:', catchResponse.data.results.bigdata_ai_jobs);
+        }
 
         if (catchResponse.data && catchResponse.data.results) {
           // Catch 3 응답 형식: { results: { it_jobs: [], bigdata_ai_jobs: [] } }
